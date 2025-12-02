@@ -113,9 +113,14 @@
 <body>
     <div class="header">
         <h1>🗺️ Mapa de Ubicaciones</h1>
-        <a href="/" class="btn-back">
-            ← Subir Nuevo Archivo
-        </a>
+        <div>
+            <a href="{{ url_for('dashboard') }}" class="btn-back">
+                ← Dashboard
+            </a>
+            <a href="{{ url_for('coordenadas') }}" class="btn-back">
+                📌 Mis Coordenadas
+            </a>
+        </div>
     </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -130,7 +135,7 @@
 
     <div class="map-container">
         <div class="map-wrapper">
-            <iframe src="{{ url_for('static', filename='mapa.html') }}"></iframe>
+            <iframe src="{{ url_for('static', filename='mapa_' + usuario.id|string + '.html') }}"></iframe>
         </div>
     </div>
 </body>

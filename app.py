@@ -1,28 +1,61 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
 import pandas as pd
 import folium
 from folium import plugins
 import os
 from werkzeug.utils import secure_filename
-import re
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'tu_clave_secreta_aqui_cambiala'
+app.secret_key = 'tu_clave_secreta_aqui_cambiala_produccion'
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///georreferenciacion.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Inicializar base de datos
+# Inicializar extensiones
 db = SQLAlchemy(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Por favor inicia sesión para acceder a esta página'
 
-# Crear carpeta de uploads si no existe
+# Crear carpetas necesarias
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs('static', exist_ok=True)
 
-# Modelo de base de datos para ubicaciones
+ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+
+# ==================== MODELOS ====================
+
+class Usuario(UserMixin, db.Model):
+    """Modelo de usuario"""
+    __tablename__ = 'usuarios'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    contraseña = db.Column(db.String(255), nullable=False)
+    fecha_registro = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relación con ubicaciones
+    ubicaciones = db.relationship('Ubicacion', backref='usuario', lazy=True, cascade='all, delete-orphan')
+
+    def establecer_contraseña(self, contraseña):
+        self.contraseña = generate_password_hash(contraseña)
+
+    def verificar_contraseña(self, contraseña):
+        return check_password_hash(self.contraseña, contraseña)
+
+    def __repr__(self):
+        return f'<Usuario {self.email}>'
+
+
 class Ubicacion(db.Model):
+    """Modelo de ubicación georeferenciada"""
     __tablename__ = 'ubicaciones'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -31,6 +64,9 @@ class Ubicacion(db.Model):
     longitud = db.Column(db.Float, nullable=False)
     archivo_origen = db.Column(db.String(255), nullable=True)
     fecha_carga = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relación con usuario
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
 
     def to_dict(self):
         return {
@@ -42,14 +78,23 @@ class Ubicacion(db.Model):
             'fecha_carga': self.fecha_carga.isoformat() if self.fecha_carga else None
         }
 
-# Crear tablas de base de datos
-with app.app_context():
-    db.create_all()
+    def __repr__(self):
+        return f'<Ubicacion {self.descripcion}>'
 
-ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+
+# ==================== LOGIN MANAGER ====================
+
+@login_manager.user_loader
+def cargar_usuario(id):
+    return Usuario.query.get(int(id))
+
+
+# ==================== UTILIDADES ====================
 
 def allowed_file(filename):
+    """Verifica si el archivo tiene extensión permitida"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 def parse_coordinates(coord_string):
     """
@@ -59,151 +104,261 @@ def parse_coordinates(coord_string):
     - "(lat, lon)"
     """
     try:
-        # Eliminar paréntesis y espacios extras
         coord_string = str(coord_string).strip().replace('(', '').replace(')', '')
-        
-        # Separar por coma
         parts = coord_string.split(',')
-        
+
         if len(parts) == 2:
             lat = float(parts[0].strip())
             lon = float(parts[1].strip())
-            
-            # Validar rango de coordenadas
+
             if -90 <= lat <= 90 and -180 <= lon <= 180:
                 return lat, lon
-        
+
         return None
     except:
         return None
 
+
+# ==================== RUTAS PÚBLICAS ====================
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    """Redirige al login si no está autenticado, al dashboard si lo está"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+
+@app.route('/registro', methods=['GET', 'POST'])
+def registro():
+    """Página de registro de nuevos usuarios"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        nombre = request.form.get('nombre', '').strip()
+        email = request.form.get('email', '').strip()
+        contraseña = request.form.get('contraseña', '')
+        confirmar = request.form.get('confirmar', '')
+
+        # Validaciones
+        if not nombre or not email or not contraseña:
+            flash('Todos los campos son requeridos', 'error')
+            return redirect(url_for('registro'))
+
+        if contraseña != confirmar:
+            flash('Las contraseñas no coinciden', 'error')
+            return redirect(url_for('registro'))
+
+        if len(contraseña) < 6:
+            flash('La contraseña debe tener al menos 6 caracteres', 'error')
+            return redirect(url_for('registro'))
+
+        if Usuario.query.filter_by(email=email).first():
+            flash('El email ya está registrado', 'error')
+            return redirect(url_for('registro'))
+
+        # Crear nuevo usuario
+        usuario = Usuario(nombre=nombre, email=email)
+        usuario.establecer_contraseña(contraseña)
+
+        db.session.add(usuario)
+        db.session.commit()
+
+        flash('¡Registro exitoso! Por favor inicia sesión', 'success')
+        return redirect(url_for('login'))
+
+    return render_template('registro.html')
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Página de login"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        contraseña = request.form.get('contraseña', '')
+
+        if not email or not contraseña:
+            flash('Email y contraseña son requeridos', 'error')
+            return redirect(url_for('login'))
+
+        usuario = Usuario.query.filter_by(email=email).first()
+
+        if usuario and usuario.verificar_contraseña(contraseña):
+            login_user(usuario, remember=request.form.get('recordar'))
+            siguiente = request.args.get('next')
+            return redirect(siguiente if siguiente else url_for('dashboard'))
+
+        flash('Email o contraseña incorrectos', 'error')
+        return redirect(url_for('login'))
+
+    return render_template('login.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    """Cerrar sesión"""
+    logout_user()
+    flash('Has cerrado sesión correctamente', 'success')
+    return redirect(url_for('login'))
+
+
+# ==================== RUTAS PROTEGIDAS ====================
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """Dashboard principal del usuario"""
+    return render_template('dashboard.html', usuario=current_user)
+
 
 @app.route('/upload', methods=['POST'])
+@login_required
 def upload_file():
+    """Cargar archivo Excel y guardar coordenadas"""
     if 'file' not in request.files:
         flash('No se seleccionó ningún archivo', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard'))
 
     file = request.files['file']
 
     if file.filename == '':
         flash('No se seleccionó ningún archivo', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard'))
 
-    if file and allowed_file(file.filename):
+    if not (file and allowed_file(file.filename)):
+        flash('Formato de archivo no permitido. Use archivos .xlsx o .xls', 'error')
+        return redirect(url_for('dashboard'))
+
+    try:
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-        try:
-            # Leer el archivo Excel
-            df = pd.read_excel(filepath)
+        # Leer Excel
+        df = pd.read_excel(filepath)
 
-            # Verificar que tenga las columnas necesarias
-            if len(df.columns) < 2:
-                flash('El archivo debe tener al menos 2 columnas (Descripción y Coordenadas)', 'error')
-                return redirect(url_for('index'))
+        if len(df.columns) < 2:
+            flash('El archivo debe tener al menos 2 columnas', 'error')
+            return redirect(url_for('dashboard'))
 
-            # Usar las primeras dos columnas
-            df.columns = ['descripcion', 'coordenadas'] + list(df.columns[2:])
+        # Renombrar columnas
+        df.columns = ['descripcion', 'coordenadas'] + list(df.columns[2:])
 
-            # Procesar coordenadas y guardar en base de datos
-            locations = []
-            errores = 0
+        # Procesar coordenadas
+        locations = []
+        errores = 0
 
-            for idx, row in df.iterrows():
-                coords = parse_coordinates(row['coordenadas'])
-                if coords:
-                    ubicacion = Ubicacion(
-                        descripcion=str(row['descripcion']),
-                        latitud=coords[0],
-                        longitud=coords[1],
-                        archivo_origen=filename
-                    )
-                    db.session.add(ubicacion)
-
-                    locations.append({
-                        'descripcion': str(row['descripcion']),
-                        'lat': coords[0],
-                        'lon': coords[1]
-                    })
-                else:
-                    errores += 1
-
-            if not locations:
-                flash('No se encontraron coordenadas válidas en el archivo', 'error')
-                return redirect(url_for('index'))
-
-            # Confirmar guardado en base de datos
-            db.session.commit()
-
-            # Crear mapa con datos de la base de datos
-            map_center = [locations[0]['lat'], locations[0]['lon']]
-            mapa = folium.Map(
-                location=map_center,
-                zoom_start=12,
-                tiles='OpenStreetMap'
-            )
-
-            # Agregar marcadores
-            for loc in locations:
-                folium.Marker(
-                    location=[loc['lat'], loc['lon']],
-                    popup=folium.Popup(loc['descripcion'], max_width=300),
-                    tooltip=loc['descripcion'],
-                    icon=folium.Icon(color='red', icon='info-sign')
-                ).add_to(mapa)
-
-            # Agregar control de pantalla completa
-            plugins.Fullscreen().add_to(mapa)
-
-            # Guardar mapa
-            map_path = os.path.join('static', 'mapa.html')
-            os.makedirs('static', exist_ok=True)
-            mapa.save(map_path)
-
-            if errores > 0:
-                flash(f'Mapa generado con {len(locations)} ubicaciones. {errores} coordenadas fueron ignoradas por formato incorrecto.', 'warning')
+        for idx, row in df.iterrows():
+            coords = parse_coordinates(row['coordenadas'])
+            if coords:
+                ubicacion = Ubicacion(
+                    descripcion=str(row['descripcion']),
+                    latitud=coords[0],
+                    longitud=coords[1],
+                    archivo_origen=filename,
+                    usuario_id=current_user.id
+                )
+                db.session.add(ubicacion)
+                locations.append({
+                    'descripcion': str(row['descripcion']),
+                    'lat': coords[0],
+                    'lon': coords[1]
+                })
             else:
-                flash(f'Mapa generado exitosamente con {len(locations)} ubicaciones', 'success')
+                errores += 1
 
-            return redirect(url_for('show_map'))
+        if not locations:
+            flash('No se encontraron coordenadas válidas', 'error')
+            return redirect(url_for('dashboard'))
 
-        except Exception as e:
-            db.session.rollback()
-            flash(f'Error al procesar el archivo: {str(e)}', 'error')
-            return redirect(url_for('index'))
+        db.session.commit()
 
-    flash('Formato de archivo no permitido. Use archivos .xlsx o .xls', 'error')
-    return redirect(url_for('index'))
+        # Crear mapa
+        map_center = [locations[0]['lat'], locations[0]['lon']]
+        mapa = folium.Map(
+            location=map_center,
+            zoom_start=12,
+            tiles='OpenStreetMap'
+        )
+
+        for loc in locations:
+            folium.Marker(
+                location=[loc['lat'], loc['lon']],
+                popup=folium.Popup(loc['descripcion'], max_width=300),
+                tooltip=loc['descripcion'],
+                icon=folium.Icon(color='red', icon='info-sign')
+            ).add_to(mapa)
+
+        plugins.Fullscreen().add_to(mapa)
+
+        map_path = os.path.join('static', f'mapa_{current_user.id}.html')
+        mapa.save(map_path)
+
+        if errores > 0:
+            flash(f'✅ {len(locations)} ubicaciones guardadas. {errores} coordenadas ignoradas', 'warning')
+        else:
+            flash(f'✅ {len(locations)} ubicaciones guardadas correctamente', 'success')
+
+        return redirect(url_for('ver_mapa'))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al procesar el archivo: {str(e)}', 'error')
+        return redirect(url_for('dashboard'))
+
 
 @app.route('/mapa')
-def show_map():
-    return render_template('mapa.html')
+@login_required
+def ver_mapa():
+    """Ver el mapa generado"""
+    return render_template('mapa.html', usuario=current_user)
+
+
+@app.route('/coordenadas')
+@login_required
+def coordenadas():
+    """Ver todas las coordenadas del usuario"""
+    ubicaciones = Ubicacion.query.filter_by(usuario_id=current_user.id).all()
+    return render_template('coordenadas.html', ubicaciones=ubicaciones, usuario=current_user)
+
+
+# ==================== API REST ====================
 
 @app.route('/api/ubicaciones', methods=['GET'])
+@login_required
 def get_ubicaciones():
-    """Obtener todas las ubicaciones guardadas"""
+    """Obtener todas las ubicaciones del usuario autenticado"""
     try:
-        ubicaciones = Ubicacion.query.all()
+        ubicaciones = Ubicacion.query.filter_by(usuario_id=current_user.id).all()
         return jsonify([loc.to_dict() for loc in ubicaciones])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/ubicaciones/<int:id>', methods=['GET'])
+@login_required
 def get_ubicacion(id):
-    """Obtener una ubicación por ID"""
+    """Obtener una ubicación específica"""
     try:
         ubicacion = Ubicacion.query.get_or_404(id)
+
+        # Verificar que pertenece al usuario actual
+        if ubicacion.usuario_id != current_user.id:
+            return jsonify({'error': 'No tienes permiso'}), 403
+
         return jsonify(ubicacion.to_dict())
-    except Exception as e:
+    except:
         return jsonify({'error': 'Ubicación no encontrada'}), 404
 
+
 @app.route('/api/ubicaciones', methods=['POST'])
-def create_ubicacion():
+@login_required
+def crear_ubicacion():
     """Crear una nueva ubicación manualmente"""
     try:
         data = request.get_json()
@@ -211,7 +366,6 @@ def create_ubicacion():
         if not data or 'descripcion' not in data or 'latitud' not in data or 'longitud' not in data:
             return jsonify({'error': 'Faltan campos requeridos'}), 400
 
-        # Validar coordenadas
         lat = float(data['latitud'])
         lon = float(data['longitud'])
 
@@ -222,7 +376,8 @@ def create_ubicacion():
             descripcion=str(data['descripcion']),
             latitud=lat,
             longitud=lon,
-            archivo_origen=data.get('archivo_origen', 'Manual')
+            archivo_origen=data.get('archivo_origen', 'Manual'),
+            usuario_id=current_user.id
         )
 
         db.session.add(ubicacion)
@@ -233,11 +388,17 @@ def create_ubicacion():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/ubicaciones/<int:id>', methods=['PUT'])
-def update_ubicacion(id):
+@login_required
+def actualizar_ubicacion(id):
     """Actualizar una ubicación"""
     try:
         ubicacion = Ubicacion.query.get_or_404(id)
+
+        if ubicacion.usuario_id != current_user.id:
+            return jsonify({'error': 'No tienes permiso'}), 403
+
         data = request.get_json()
 
         if 'descripcion' in data:
@@ -259,26 +420,30 @@ def update_ubicacion(id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/ubicaciones/<int:id>', methods=['DELETE'])
-def delete_ubicacion(id):
+@login_required
+def eliminar_ubicacion(id):
     """Eliminar una ubicación"""
     try:
         ubicacion = Ubicacion.query.get_or_404(id)
+
+        if ubicacion.usuario_id != current_user.id:
+            return jsonify({'error': 'No tienes permiso'}), 403
+
         db.session.delete(ubicacion)
         db.session.commit()
-        return jsonify({'mensaje': 'Ubicación eliminada exitosamente'})
+        return jsonify({'mensaje': 'Ubicación eliminada'})
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/ubicaciones/archivo/<archivo_origen>', methods=['GET'])
-def get_ubicaciones_by_archivo(archivo_origen):
-    """Obtener ubicaciones por archivo de origen"""
-    try:
-        ubicaciones = Ubicacion.query.filter_by(archivo_origen=archivo_origen).all()
-        return jsonify([loc.to_dict() for loc in ubicaciones])
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+
+# ==================== CREAR TABLAS ====================
+
+with app.app_context():
+    db.create_all()
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
