@@ -191,6 +191,84 @@
             background: #667eea;
             color: white;
         }
+
+        .saved-locations {
+            margin-top: 30px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .saved-locations h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .location-item {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .location-info {
+            flex-grow: 1;
+        }
+
+        .location-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .location-coords {
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .location-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-small {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background 0.2s;
+        }
+
+        .btn-small:hover {
+            background: #764ba2;
+        }
+
+        .btn-delete {
+            background: #dc3545;
+        }
+
+        .btn-delete:hover {
+            background: #c82333;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
     </style>
 </head>
 <body>
@@ -255,12 +333,20 @@
                 </table>
             </div>
         </div>
+
+        <div class="saved-locations">
+            <h3>📌 Ubicaciones Guardadas</h3>
+            <div id="locationsList">
+                <div class="loading">Cargando ubicaciones...</div>
+            </div>
+        </div>
     </div>
 
     <script>
         const fileInput = document.getElementById('fileInput');
         const fileName = document.getElementById('fileName');
         const submitBtn = document.getElementById('submitBtn');
+        const locationsList = document.getElementById('locationsList');
 
         fileInput.addEventListener('change', function(e) {
             if (this.files.length > 0) {
@@ -272,6 +358,86 @@
                 submitBtn.disabled = true;
             }
         });
+
+        // Cargar ubicaciones guardadas
+        function loadLocations() {
+            fetch('/api/ubicaciones')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        locationsList.innerHTML = '<div class="empty-state">No hay ubicaciones guardadas aún</div>';
+                    } else {
+                        locationsList.innerHTML = data.map(loc => `
+                            <div class="location-item">
+                                <div class="location-info">
+                                    <div class="location-name">${loc.descripcion}</div>
+                                    <div class="location-coords">
+                                        📍 ${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}
+                                        <br><small>Archivo: ${loc.archivo_origen}</small>
+                                    </div>
+                                </div>
+                                <div class="location-actions">
+                                    <button class="btn-small" onclick="editLocation(${loc.id}, '${loc.descripcion}', ${loc.lat}, ${loc.lon})">Editar</button>
+                                    <button class="btn-small btn-delete" onclick="deleteLocation(${loc.id})">Eliminar</button>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                })
+                .catch(error => {
+                    locationsList.innerHTML = '<div class="empty-state">Error al cargar ubicaciones</div>';
+                    console.error('Error:', error);
+                });
+        }
+
+        // Eliminar ubicación
+        function deleteLocation(id) {
+            if (confirm('¿Estás seguro de que deseas eliminar esta ubicación?')) {
+                fetch(`/api/ubicaciones/${id}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    loadLocations();
+                })
+                .catch(error => console.error('Error:', error));
+            }
+        }
+
+        // Editar ubicación
+        function editLocation(id, descripcion, lat, lon) {
+            const newDesc = prompt('Descripción:', descripcion);
+            if (newDesc !== null) {
+                const newLat = parseFloat(prompt('Latitud:', lat));
+                if (!isNaN(newLat)) {
+                    const newLon = parseFloat(prompt('Longitud:', lon));
+                    if (!isNaN(newLon)) {
+                        fetch(`/api/ubicaciones/${id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                descripcion: newDesc,
+                                latitud: newLat,
+                                longitud: newLon
+                            })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            loadLocations();
+                        })
+                        .catch(error => console.error('Error:', error));
+                    }
+                }
+            }
+        }
+
+        // Cargar ubicaciones al abrir la página
+        loadLocations();
+
+        // Recargar ubicaciones cada 5 segundos
+        setInterval(loadLocations, 5000);
     </script>
 </body>
 </html>
