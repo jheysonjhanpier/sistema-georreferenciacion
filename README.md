@@ -69,12 +69,51 @@ Tu archivo Excel debe tener **2 columnas**:
 
 **Nota**: Se incluye un archivo `ejemplo_coordenadas.xlsx` que puedes usar para probar.
 
-## 🎯 Cómo usar la aplicación
+## 🎯 Flujo de Uso de la Aplicación
 
-1. Abre la aplicación en tu navegador (`http://localhost:5000`)
-2. Haz clic en el área de carga o arrastra tu archivo Excel
-3. Haz clic en "Generar Mapa"
-4. ¡Visualiza tus ubicaciones en el mapa interactivo!
+### 1️⃣ Registro/Login
+```
+http://localhost:5000
+    ↓
+¿Tienes cuenta?
+├─ No → Click en "Regístrate aquí"
+│   └─ Llenar formulario de registro
+│       └─ Ingresar a la app
+│
+└─ Sí → Click "Inicia sesión"
+    └─ Ingresar email y contraseña
+        └─ Acceder al Dashboard
+```
+
+### 2️⃣ En el Dashboard
+```
+Dashboard (/dashboard)
+├─ Cargar archivo Excel
+│   └─ Seleccionar archivo con coordenadas
+│       └─ Las coordenadas se guardan en la BD
+│           └─ Se genera mapa personalizado
+│               └─ Redirige a vista del mapa
+│
+├─ Ver Mapa (/mapa)
+│   └─ Visualiza todas tus ubicaciones
+│
+└─ Ver Mis Coordenadas (/coordenadas)
+    ├─ Lista completa de ubicaciones
+    ├─ Búsqueda en tiempo real
+    ├─ Editar descripción y coordenadas
+    └─ Eliminar ubicaciones
+```
+
+### 3️⃣ Gestionar Coordenadas
+- **Crear**: Cargar Excel o crear manual vía API
+- **Leer**: Ver en tabla o en mapa interactivo
+- **Actualizar**: Botón "Editar" en cada ubicación
+- **Eliminar**: Botón "Eliminar" con confirmación
+
+### 4️⃣ Cerrar Sesión
+- Click en "Cerrar Sesión" en el header
+- Se elimina la cookie de sesión
+- Redirige al login
 
 ## 🌍 Obtener coordenadas
 
@@ -108,17 +147,19 @@ proyecto/
 
 ## 🛠️ Características
 
+- ✅ **Autenticación de usuarios** (Registro, Login, Logout)
+- ✅ Gestión de sesiones con opción "Recuérdame"
+- ✅ **Base de datos SQLite con usuarios y coordenadas**
+- ✅ **Contraseñas encriptadas** con Werkzeug
 - ✅ Carga de archivos Excel (.xlsx, .xls)
-- ✅ **Base de datos SQLite para persistencia de coordenadas**
-- ✅ **Visualización de ubicaciones guardadas en tiempo real**
-- ✅ **CRUD completo de ubicaciones (Crear, Leer, Actualizar, Eliminar)**
+- ✅ **Cada usuario tiene sus propias coordenadas**
+- ✅ **CRUD completo de ubicaciones** (Crear, Leer, Actualizar, Eliminar)
+- ✅ Búsqueda en tiempo real
+- ✅ Mapa interactivo personalizado por usuario
 - ✅ Validación de coordenadas
-- ✅ Mapa interactivo con marcadores
-- ✅ Tooltips y popups con descripciones
+- ✅ API REST protegida (solo datos propios)
 - ✅ Diseño responsive y moderno
-- ✅ Manejo de errores
-- ✅ Pantalla completa en el mapa
-- ✅ API REST para integración
+- ✅ Dashboard intuitivo
 
 ## 🔌 API REST Endpoints
 
@@ -196,26 +237,38 @@ Verifica que tu Excel tenga exactamente 2 columnas y que las coordenadas estén 
 
 ## 💾 Base de Datos
 
-La aplicación utiliza **SQLite** para almacenar las coordenadas de forma persistente.
+La aplicación utiliza **SQLite** con dos tablas principales:
 
 ### Archivo de Base de Datos
-- Ubicación: `georreferenciacion.db` (se crea automáticamente en la raíz del proyecto)
+- Ubicación: `georreferenciacion.db` (se crea automáticamente)
 
-### Estructura de la Tabla `ubicaciones`
+### Tabla `usuarios`
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| id | Integer | Identificador único |
-| descripcion | String(255) | Nombre o descripción del lugar |
+| id | Integer | Identificador único (PK) |
+| nombre | String(100) | Nombre del usuario |
+| email | String(120) | Email único (índice) |
+| contraseña | String(255) | Contraseña encriptada |
+| fecha_registro | DateTime | Cuándo se registró |
+
+### Tabla `ubicaciones`
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| id | Integer | Identificador único (PK) |
+| descripcion | String(255) | Nombre del lugar |
 | latitud | Float | Coordenada de latitud |
 | longitud | Float | Coordenada de longitud |
-| archivo_origen | String(255) | Nombre del archivo de origen |
-| fecha_carga | DateTime | Fecha y hora de carga |
+| archivo_origen | String(255) | De dónde vino (nombre archivo o "Manual") |
+| fecha_carga | DateTime | Cuándo se agregó |
+| usuario_id | Integer | FK a tabla usuarios (aislamiento de datos) |
 
 ### Ventajas del Sistema Actual
-- ✅ Los datos se guardan automáticamente al cargar un archivo Excel
-- ✅ Las ubicaciones persisten entre sesiones
-- ✅ Puedes editar, eliminar y agregar ubicaciones manualmente
-- ✅ API REST disponible para integración con otras aplicaciones
+- ✅ **Cada usuario solo ve sus propias coordenadas**
+- ✅ Contraseñas encriptadas con Werkzeug
+- ✅ Datos persistentes entre sesiones
+- ✅ CRUD completo protegido
+- ✅ API REST asegurada (solo datos propios)
+- ✅ Auditoría de fechas de carga
 
 ## 📞 Notas Adicionales
 
