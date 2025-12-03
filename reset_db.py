@@ -1,20 +1,21 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 Script para recrear la base de datos con la estructura correcta
 """
 
 from app import app, db, Usuario, Ubicacion
 
-print("🔄 Recreando base de datos...")
+print("[*] Recreando base de datos...")
 
 with app.app_context():
     # Eliminar todas las tablas
     db.drop_all()
-    print("✅ Tablas antiguas eliminadas")
+    print("[+] Tablas antiguas eliminadas")
 
     # Crear todas las tablas nuevas
     db.create_all()
-    print("✅ Tablas nuevas creadas")
+    print("[+] Tablas nuevas creadas")
 
     # Crear usuario de demo para pruebas
     usuario_demo = Usuario(
@@ -26,7 +27,7 @@ with app.app_context():
     db.session.add(usuario_demo)
     db.session.commit()
 
-    print("✅ Usuario de demo creado:")
+    print("[+] Usuario de demo creado:")
     print("   Email: demo@test.com")
     print("   Contraseña: 123456")
-    print("\n🎉 Base de datos lista para usar")
+    print("\n[OK] Base de datos lista para usar")
