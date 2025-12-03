@@ -212,6 +212,10 @@ def repair_db():
     """Reparar base de datos corrupta (solo accesible internamente)"""
     try:
         with app.app_context():
+            # Cerrar conexiones existentes
+            db.session.remove()
+            db.engine.dispose()
+
             # Eliminar todas las tablas
             db.drop_all()
             # Crear nuevas tablas con schema correcto
@@ -226,6 +230,9 @@ def repair_db():
             db.session.add(usuario_demo)
             db.session.commit()
 
+            # Cerrar sesión nuevamente
+            db.session.remove()
+
             return jsonify({
                 'success': True,
                 'message': 'Base de datos reparada correctamente',
@@ -233,6 +240,7 @@ def repair_db():
                 'contraseña': '123456'
             })
     except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
