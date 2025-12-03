@@ -478,8 +478,34 @@ def eliminar_ubicacion(id):
 
 # ==================== CREAR TABLAS ====================
 
-with app.app_context():
-    db.create_all()
+def init_db():
+    """Inicializar base de datos con auto-reparación"""
+    with app.app_context():
+        try:
+            # Intentar crear todas las tablas
+            db.create_all()
+
+            # Verificar que la tabla ubicaciones tiene la columna usuario_id
+            inspector = db.inspect(db.engine)
+            if 'ubicaciones' in inspector.get_table_names():
+                columns = [col['name'] for col in inspector.get_columns('ubicaciones')]
+                if 'usuario_id' not in columns:
+                    print("[!] Columna usuario_id faltante en ubicaciones. Reparando...")
+                    db.drop_all()
+                    db.create_all()
+                    print("[+] Base de datos reparada")
+        except Exception as e:
+            print(f"[!] Error al inicializar BD: {str(e)}")
+            print("[*] Intentando reparación completa...")
+            try:
+                db.drop_all()
+                db.create_all()
+                print("[+] Base de datos reparada exitosamente")
+            except Exception as repair_error:
+                print(f"[!] Error en reparación: {str(repair_error)}")
+
+# Inicializar BD al iniciar la app
+init_db()
 
 
 if __name__ == '__main__':
