@@ -207,6 +207,35 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route('/repair-db')
+def repair_db():
+    """Reparar base de datos corrupta (solo accesible internamente)"""
+    try:
+        with app.app_context():
+            # Eliminar todas las tablas
+            db.drop_all()
+            # Crear nuevas tablas con schema correcto
+            db.create_all()
+
+            # Crear usuario de demo
+            usuario_demo = Usuario(
+                nombre="Usuario Demo",
+                email="demo@test.com"
+            )
+            usuario_demo.establecer_contraseña("123456")
+            db.session.add(usuario_demo)
+            db.session.commit()
+
+            return jsonify({
+                'success': True,
+                'message': 'Base de datos reparada correctamente',
+                'usuario': 'demo@test.com',
+                'contraseña': '123456'
+            })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ==================== RUTAS PROTEGIDAS ====================
 
 @app.route('/dashboard')
@@ -442,32 +471,7 @@ def eliminar_ubicacion(id):
 # ==================== CREAR TABLAS ====================
 
 with app.app_context():
-    try:
-        # Intentar crear todas las tablas
-        db.create_all()
-    except Exception as e:
-        # Si hay error (BD corrupta), intentar repararla
-        print(f"⚠️ Error al crear tablas: {str(e)}")
-        print("🔄 Intentando reparar la base de datos...")
-        try:
-            # Eliminar y recrear tablas
-            db.drop_all()
-            db.create_all()
-            print("✅ Base de datos reparada exitosamente")
-
-            # Crear usuario de demo si no existe
-            demo_user = Usuario.query.filter_by(email='demo@test.com').first()
-            if not demo_user:
-                usuario_demo = Usuario(
-                    nombre="Usuario Demo",
-                    email="demo@test.com"
-                )
-                usuario_demo.establecer_contraseña("123456")
-                db.session.add(usuario_demo)
-                db.session.commit()
-                print("✅ Usuario de demo creado")
-        except Exception as repair_error:
-            print(f"❌ No se pudo reparar la BD: {str(repair_error)}")
+    db.create_all()
 
 
 if __name__ == '__main__':
